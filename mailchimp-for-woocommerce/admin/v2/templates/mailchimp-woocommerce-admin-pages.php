@@ -95,6 +95,7 @@ if ((MC_WC_CONFIRMATION === $active_breadcrumb && ! $is_confirmation)) {
 		$active_breadcrumb = MC_WC_REVIEW_SYNC_SETTINGS;
 	}
 }
+$promo_active = false;
 ?>
 
 <div class="mc-wc-settings-wrapper woocommerce <?php echo $active_breadcrumb; ?>">
@@ -134,8 +135,10 @@ if ((MC_WC_CONFIRMATION === $active_breadcrumb && ! $is_confirmation)) {
 
 			<!-- Banner -->
 			<?php if ( MC_WC_CONNECT_ACCOUNTS === $active_breadcrumb) : ?>
+				<?php Mailchimp_Woocommerce_Event::track('connect_accounts:view_screen', new DateTime()); ?>
 				<?php include_once 'connect-accounts/header.php'; ?>
-			<?php elseif (MC_WC_REVIEW_SYNC_SETTINGS === $active_breadcrumb && $has_valid_api_key): ?>
+      <?php elseif (MC_WC_REVIEW_SYNC_SETTINGS === $active_breadcrumb && $has_valid_api_key): ?>
+				<?php Mailchimp_Woocommerce_Event::track('review_settings:view_screen', new DateTime()); ?>
 				<?php include_once 'review-sync-settings/header.php'; ?>
 			<?php elseif (MC_WC_CONFIRMATION === $active_breadcrumb && $is_confirmation): ?>
 				<?php include_once 'confirmation/header.php'; ?>
@@ -198,9 +201,15 @@ if ((MC_WC_CONFIRMATION === $active_breadcrumb && ! $is_confirmation)) {
 		<!-- Button footer -->
 		<div class="mc-wc-setting-footer-buttons">
 			<?php if ( MC_WC_REVIEW_SYNC_SETTINGS === $active_breadcrumb && $has_valid_api_key): ?>
-				<input type="submit" name="mailchimp_submit" class="mc-wc-btn mc-wc-btn-primary" value="<?php esc_html_e('Sync now', 'mailchimp-for-woocommerce'); ?>" />
+				<input type="submit" name="mailchimp_submit" class="mc-wc-btn mc-wc-btn-primary" data-position="bottom" value="<?php esc_html_e('Sync now', 'mailchimp-for-woocommerce'); ?>" />
 			<?php endif;?>
 		</div>
 		<?php endif; ?>
+
+        <?php if($promo_active): ?>
+        <div class="promo-disclaimer">
+            *24X ROI Standard Plan: Based on all e-commerce revenue attributable to Standard plan users’ Mailchimp campaigns from April 2023 to April 2024.
+        </div>
+        <?php endif; ?>
 	</form>
 </div>
