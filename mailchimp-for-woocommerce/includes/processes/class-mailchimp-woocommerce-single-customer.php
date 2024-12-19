@@ -50,7 +50,7 @@ class MailChimp_Woocommerce_Single_Customer extends Mailchimp_Woocommerce_Job
 
         $customer = new MailChimp_WooCommerce_Customer();
 
-        if ($user && is_null($wordpress_user_id)) {
+        if ($user && $wordpress_user_id) {
             $data = array(
                 'id' => $this->customer_data->user_id,
                 'email_address' => $this->customer_data->email,
@@ -85,7 +85,14 @@ class MailChimp_Woocommerce_Single_Customer extends Mailchimp_Woocommerce_Job
             $language = get_locale();
         }
 
+        $customer->setOptInStatus(false);
         $customer->fromArray($data);
+
+        // set the address from the customer lookup table
+        $customer->getAddress()->setCity($this->customer_data->city ?? '');
+        $customer->getAddress()->setCountry($this->customer_data->country ?? '');
+        $customer->getAddress()->setProvince($this->customer_data->state ?? '');
+        $customer->getAddress()->setPostalCode($this->customer_data->postcode ?? '');
 
         // Configure merge tags
         $fn = trim($data['first_name']);
@@ -105,7 +112,6 @@ class MailChimp_Woocommerce_Single_Customer extends Mailchimp_Woocommerce_Job
             $merge_fields = $merge_fields_system;
         }
 
-
         // see if this store has the auto subscribe setting enabled on initial sync
         $plugin_options = \Mailchimp_Woocommerce_DB_Helpers::get_option('mailchimp-woocommerce');
         $subscribe_setting = (string)$plugin_options['mailchimp_auto_subscribe'];
@@ -115,87 +121,117 @@ class MailChimp_Woocommerce_Single_Customer extends Mailchimp_Woocommerce_Job
         $status_meta = mailchimp_get_subscriber_status_options($new_status);
 
         try {
-            $subscriber = $api->member(mailchimp_get_list_id(), $email);
+            $subscriber_status = $subscribe_setting === '0' ? 'transactional' : 'subscribed';
+
+            // if we're only syncing existing users, we need to make a GET request.
+            // this will throw a 404 if they don't exist on the list.
+            if ($only_sync_existing) {
+                $api->member($list_id, $email);
+            }
+
+            $subscriber = $api->update($list_id, $email, $subscriber_status, $merge_fields, null, $language);
+
             $current_status = $subscriber['status'];
 
-            if ($only_sync_existing) {
-                if ($current_status != 'archived' && isset($subscriber)) {
-                    $status = !in_array($subscriber['status'], array('unsubscribed', 'transactional'));
-                    $customer->setOptInStatus($status);
+            // make sure we set the proper customer status before submitting
+            $customer->setOptInStatus(in_array($current_status, array('subscribed', 'pending')));
 
-                    if ($subscriber['status'] === 'transactional') {
-                        $new_status = '0';
-                    } else if ($subscriber['status'] === 'subscribed') {
-                        $new_status = '1';
-                    } else {
-                        $new_status = $subscriber['status'];
-                    }
-                    // if the wordpress user id is not empty, and the status is subscribed, we can update the
-                    // subscribed status meta so it reflects the current status of Mailchimp during a sync.
-                    if ($wordpress_user_id && $current_status) {
-                        update_user_meta($wordpress_user_id, 'mailchimp_woocommerce_is_subscribed', $new_status);
-                    }
-                }
+            // update the member tags but fail silently just in case.
+            $api->updateMemberTags(mailchimp_get_list_id(), $email, true);
 
-                return false;
+            mailchimp_tell_system_about_user_submit($email, $status_meta);
+
+            // update the customer record
+            $updated_customer = $api->updateCustomer($store_id, $customer);
+
+            // increment the sync counter
+            mailchimp_register_synced_resource('customers');
+
+            mailchimp_log('member.sync', "Updated Member {$email}", array(
+                'status' => $subscriber['status'],
+                'language' => $language,
+                'merge_fields' => $merge_fields,
+                'gdpr_fields' => [],
+                'customer_id' => $customer->getId(),
+                'updated_customer' => (bool) $updated_customer,
+            ));
+
+            if ($current_status === 'transactional') {
+                $new_status = '0';
+            } else if ($current_status === 'subscribed') {
+                $new_status = '1';
+            } else {
+                $new_status = $current_status;
             }
-
-
-            if (isset($subscriber['status'])) {
-                if ( in_array($subscriber['status'], ['subscribed', 'transactional', 'unsubscribed', 'archived', 'cleaned']) ) {
-                    $subscriber['status'] = $subscribe_setting === '0' ? 'transactional' : 'subscribed';
-                }
-
-                // ok let's update this member
-                $api->update($list_id, $email, $subscriber['status'], $merge_fields, null, $language);
-
-                // update the member tags but fail silently just in case.
-                $api->updateMemberTags(mailchimp_get_list_id(), $email, true);
-
-                mailchimp_tell_system_about_user_submit($email, $status_meta);
-                mailchimp_log('member.sync', "Updated Member {$email}", array(
-                    'status' => $subscriber['status'],
-                    'language' => $language,
-                    'merge_fields' => $merge_fields,
-                    'gdpr_fields' => [],
-                ));
-
-                return false;
+            // if the wordpress user id is not empty, and the status is subscribed, we can update the
+            // subscribed status meta so it reflects the current status of Mailchimp during a sync.
+            if ($wordpress_user_id && $current_status) {
+                update_user_meta($wordpress_user_id, 'mailchimp_woocommerce_is_subscribed', $new_status);
             }
-
         } catch (MailChimp_WooCommerce_RateLimitError $e) {
-            sleep(3);
+            sleep(1);
             mailchimp_error('member.sync.error', mailchimp_error_trace($e, "RateLimited :: user #{$this->id}"));
             $this->retry();
         } catch (Exception $e) {
             $compliance_state = mailchimp_string_contains($e->getMessage(), 'compliance state');
 
             if ($compliance_state) {
-                return $this->handleComplianceState($email, $merge_fields);
+                $compliance_state_response = $this->handleComplianceState($email, $merge_fields);
+                // make sure we set the proper customer status before submitting
+                $customer->setOptInStatus(in_array($compliance_state_response['status'], array('subscribed', 'pending')));
+                // update the customer record
+                $api->updateCustomer($store_id, $customer);
+                // increment the sync counter
+                mailchimp_register_synced_resource('customers');
+                return $compliance_state_response;
             }
 
             if ($e->getCode() == 404) {
-
+                if ($only_sync_existing) {
+                    mailchimp_debug('initial_sync', "{$email} was not on the list, and the sync asked to only sync existing members.");
+                    return false;
+                }
                 try {
                     $uses_doi = isset($status_meta['requires_double_optin']) && $status_meta['requires_double_optin'];
                     $status_if_new = $uses_doi && $should_auto_subscribe ? 'pending' : $status_meta['created'];
 
-                    $api->subscribe($list_id, $email, $status_if_new, $merge_fields, null, $language);
+                    $result = $api->subscribe($list_id, $email, $status_if_new, $merge_fields, null, $language);
 
                     // update the member tags but fail silently just in case.
                     $api->updateMemberTags(mailchimp_get_list_id(), $email, true);
 
                     mailchimp_tell_system_about_user_submit($email, $status_meta);
 
+                    // make sure we set the proper customer status before submitting
+                    $customer->setOptInStatus(in_array($result['status'], array('subscribed', 'pending')));
+
+                    // update the customer record
+                    $updated_customer = $api->updateCustomer($store_id, $customer);
+
+                    // increment the sync counter
+                    mailchimp_register_synced_resource('customers');
+
                     if ($status_meta['created']) {
-                        mailchimp_log('member.sync', "Subscribed Member {$email}", array('status_if_new' => $status_if_new, 'has_doi' => $uses_doi, 'merge_fields' => $merge_fields));
+                        mailchimp_log('member.sync', "Subscribed Member {$email}", array('updated_customer' => $updated_customer, 'status_if_new' => $status_if_new, 'has_doi' => $uses_doi, 'merge_fields' => $merge_fields));
                     } else {
-                        mailchimp_log('member.sync', "{$email} is Pending Double OptIn", array('status_if_new' => $status_if_new, 'has_doi' => $uses_doi, 'status_meta' => $status_meta));
+                        mailchimp_log('member.sync', "{$email} is Pending Double OptIn", array('updated_customer' => $updated_customer, 'status_if_new' => $status_if_new, 'has_doi' => $uses_doi, 'status_meta' => $status_meta));
+                    }
+
+                    $current_status = $new_status = $result['status'];
+
+                    if ($current_status === 'transactional') {
+                        $new_status = '0';
+                    } else if ($current_status === 'subscribed') {
+                        $new_status = '1';
+                    }
+                    // if the wordpress user id is not empty, and the status is subscribed, we can update the
+                    // subscribed status meta so it reflects the current status of Mailchimp during a sync.
+                    if ($wordpress_user_id && $current_status) {
+                        update_user_meta($wordpress_user_id, 'mailchimp_woocommerce_is_subscribed', $new_status);
                     }
                 } catch (Exception $e) {
                     mailchimp_log('member.sync', $e->getMessage());
                 }
-                return false;
             }
         }
 

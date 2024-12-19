@@ -3,11 +3,11 @@ Contributors: ryanhungate, Mailchimp
 Tags: ecommerce,email,workflows,mailchimp
 Donate link: https://mailchimp.com
 Requires at least: 6.2
-Tested up to: 6.6
-Stable tag: 4.4
+Tested up to: 6.7
+Stable tag: 5.0
 Requires PHP: 7.4
 WC requires at least: 8.2
-WC tested up to: 9.3
+WC tested up to: 9.5
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 Connect your store to your Mailchimp audience to track sales, create targeted emails, send abandoned cart emails, and more.
@@ -78,9 +78,15 @@ At this time, the synchronization of product categories from WooCommerce to Mail
 If you are unable to sync or connect with Mailchimp, you can open a ticket on our [Github plugin page](https://github.com/mailchimp/mc-woocommerce/issues). Please provide the version of the plugin and PHP you're using, any fatal errors in the WooCommerce logs (WooCommerce -> Status -> Logs) you're seeing, along with relevant information to the problem you're experiencing.
 
 == Changelog ==
-= 4.4 =
-* Bumps axios from 1.6.7 to 1.7.7 in /blocks
-* Bumps webpack from 5.88.2 to 5.94.0 in /blocks
-* Fix for Multisite users unable to activate or view plugin 
-* Removes unused admin/partial files
-* Updates to copy on account creation page 
+= 5.0 =
+* New Features
+* Feature: Introduced a user-agent header "Mailchimp Support" to identify the plugin for support. Servers blocking external post traffic should add this to their safe user-agents.*
+* Fixed
+* Bug: Resolved issue where product images appeared blurry after plugin updates and improved product image handling.
+* Bug: Fixed PHP warning triggered when executing wpml_switch_language_action due to missing language information. Language code validation is now performed before function execution.
+* Bug: Addressed syncing issues with customers and promo codes, specifically the inability to sync more than 500 orders.
+* Bug: Resolved API Request Error related to Mailchimp's API during sync operations.
+* Bug: Corrected inaccurate overview stats shifting during sync, which incorrectly displayed order numbers.
+* Bug: Fixed an issue where esc_html was incorrectly used instead of esc_attr, causing store names to be saved with HTML entities in Mailchimp.
+* Maintenance
+* Maintenance: Implemented workaround for Content Security Policy issues related to unsafe-eval in mailchimp-woocommerce-public.min.js.

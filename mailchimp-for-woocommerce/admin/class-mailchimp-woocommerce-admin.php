@@ -160,6 +160,7 @@ class MailChimp_WooCommerce_Admin extends MailChimp_WooCommerce_Options {
 						'store_disconnect_in_progress' => __( 'Disconnecting store in progress', 'mailchimp-for-woocommerce' ),
 						'login_popup_blocked'          => __( 'Login Popup is blocked!', 'mailchimp-for-woocommerce' ),
 						'login_popup_blocked_desc'     => __( 'Please allow your browser to show popups for this page', 'mailchimp-for-woocommerce' ),
+                        'toggling_chimpstatic_in_progress' => __( 'Toggling Mailchimp script in progress', 'mailchimp-for-woocommerce' ),
 						'support_message_sending'      => __( 'Sending support request', 'mailchimp-for-woocommerce' ),
 						'support_message_ok'           => __( 'Message received', 'mailchimp-for-woocommerce' ),
 						'support_message_desc'         => __( 'Thanks, your message has been received.', 'mailchimp-for-woocommerce' ),
@@ -205,7 +206,7 @@ class MailChimp_WooCommerce_Admin extends MailChimp_WooCommerce_Options {
 	public function add_plugin_admin_menu() {
 
 		// Add woocommerce menu subitem
-        $mailchimp_icon = 'data:image/svg+xml;base64,'.$this->mailchimp_svg();
+    $mailchimp_icon = 'data:image/svg+xml;base64,'.$this->mailchimp_svg();
 
 		add_menu_page(
 			__( 'Mailchimp for WooCommerce', 'mailchimp-for-woocommerce' ),
@@ -216,55 +217,8 @@ class MailChimp_WooCommerce_Admin extends MailChimp_WooCommerce_Options {
 			$mailchimp_icon,
 			58
 		);
+  }
 
-		// Add the WooCommerce navigation items if the feauture exists.
-		if ( ! class_exists( '\Automattic\WooCommerce\Admin\Features\Navigation\Menu' ) ) {
-			return;
-		}
-
-		Menu::add_plugin_item(
-			array(
-				'id'         => 'mailchimp-for-woocommerce',
-				'title'      => __( 'Mailchimp', 'mailchimp-for-woocommerce' ),
-				'capability' => mailchimp_get_allowed_capability(),
-				'url'        => $this->plugin_name,
-			)
-		);
-	}
-
-	/**
-	 * Register the administration menu for this plugin into the WordPress Dashboard menu.
-	 *
-	 * @since    1.0.0
-	 */
-	public function add_plugin_admin_menu_2() {
-
-        $cap = mailchimp_get_allowed_capability();
-
-		// Add woocommerce menu subitem
-		add_submenu_page(
-			'woocommerce',               // Parent Slug
-			__( 'Mailchimp for WooCommerce', 'mailchimp-for-woocommerce' ),
-			__( 'Mailchimp', 'mailchimp-for-woocommerce' ),
-            $cap,
-			$this->plugin_name,
-			array( $this, 'display_plugin_setup_page') // Callback function to display content
-		);
-
-		// Add the WooCommerce navigation items if the feauture exists.
-		if ( ! class_exists( '\Automattic\WooCommerce\Admin\Features\Navigation\Menu' ) ) {
-			return;
-		}
-
-		Menu::add_plugin_item(
-			array(
-				'id'         => 'mailchimp-for-woocommerce',
-				'title'      => __( 'Mailchimp', 'mailchimp-for-woocommerce' ),
-				'capability' => $cap,
-				'url'        => $this->plugin_name,
-			)
-		);
-	}
 
 	/**
 	 * Include the new Navigation Bar the Admin page.
@@ -894,6 +848,12 @@ class MailChimp_WooCommerce_Admin extends MailChimp_WooCommerce_Options {
                 }
                 break;
 			case 'plugin_settings':
+                if ( isset( $_POST['mc_action'] ) && in_array( $_POST['mc_action'], array( 'toggle_chimpstatic_script' ) ) ) {
+                    $path = 'admin.php?page=mailchimp-woocommerce&tab=plugin_settings';
+                    wp_redirect( $path );
+                    exit();
+                }
+
 				// case disconnect
 				if ( $this->is_disconnecting() ) {
 					// Disconnect store!
@@ -1901,7 +1861,7 @@ class MailChimp_WooCommerce_Admin extends MailChimp_WooCommerce_Options {
 									// Orders
                                     jQuery('.sync-orders .sync-number-finished').html(response.orders_in_mailchimp.toLocaleString(undefined, {maximumFractionDigits: 0}));
 									// Contacts
-									jQuery('.sync-contacts .sync-number-total span').html(response.customers_in_mailchimp.toLocaleString(undefined, {maximumFractionDigits: 0}));
+									jQuery('.sync-contacts .sync-number-finished').html(response.customers_in_mailchimp.toLocaleString(undefined, {maximumFractionDigits: 0}));
 
 									// only call status again if sync is running.
 									setTimeout(function() {
@@ -1986,7 +1946,7 @@ class MailChimp_WooCommerce_Admin extends MailChimp_WooCommerce_Options {
 		$store->setMoneyFormat( $store->getCurrencyCode() );
 
 		// set the basics
-		$store->setName( $this->array_get( $data, 'store_name', get_option( 'blogname' ) ) );
+		$store->setName( html_entity_decode($this->array_get( $data, 'store_name', get_option( 'blogname' ) )) );
 		$store->setDomain( get_option( 'siteurl' ) );
 		$store->setEmailAddress( $this->array_get( $data, 'admin_email', get_option('admin_email') ) );
 		$store->setAddress( $this->address( $data ) );
@@ -2210,7 +2170,7 @@ class MailChimp_WooCommerce_Admin extends MailChimp_WooCommerce_Options {
 		$response_body = $job->toggle( $opt );
 
 		// if success, set internal option to check for opt and display on sync page
-		if ( $response_body && $response_body->success == true ) {
+		if ( $response_body && isset($response_body->success) && $response_body->success == true ) {
 			$this->setData( 'tower.opt', $opt );
 			wp_send_json_success( __( 'Saved', 'mailchimp-for-woocommerce' ) );
 		} else {
@@ -2269,6 +2229,14 @@ class MailChimp_WooCommerce_Admin extends MailChimp_WooCommerce_Options {
 			)
 		);
 	}
+
+    public function mailchimp_woocommerce_ajax_toggle_chimpstatic_script() {
+        $this->adminOnlyMiddleware();
+        $code_snippet_activated = (bool) \Mailchimp_Woocommerce_DB_Helpers::get_option( 'mailchimp-woocommerce-code-snippet', '1');
+        \Mailchimp_Woocommerce_DB_Helpers::update_option( 'mailchimp-woocommerce-code-snippet', $code_snippet_activated ? '0' : '1');
+        mailchimp_log('plugin admin', "Updated mailchimp code snippet to ".($code_snippet_activated ? '0' : '1'));
+        wp_send_json_success( array( 'success' => true, 'status' =>  $code_snippet_activated ? '0' : '1') );
+    }
 
 	/**
 	 *
